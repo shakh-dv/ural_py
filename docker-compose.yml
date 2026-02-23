@@ -1,0 +1,55 @@
+services:
+  traefik:
+    image: traefik:v3.1
+    container_name: ural-traefik
+    restart: unless-stopped
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --certificatesresolvers.letsencrypt.acme.tlschallenge=true
+      - --certificatesresolvers.letsencrypt.acme.email=${LETSENCRYPT_EMAIL}
+      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+      - --log.level=INFO
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_certs:/letsencrypt
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: ural-nginx
+    restart: unless-stopped
+    depends_on:
+      - app
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - uploads:/srv/uploads:ro
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.ural.rule=Host(`${APP_DOMAIN}`)
+      - traefik.http.routers.ural.entrypoints=websecure
+      - traefik.http.routers.ural.tls=true
+      - traefik.http.routers.ural.tls.certresolver=letsencrypt
+      - traefik.http.services.ural.loadbalancer.server.port=8080
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ural-app
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      UPLOAD_DIR: /srv/uploads/dispatch
+    volumes:
+      - uploads:/srv/uploads
+
+volumes:
+  traefik_certs:
+  uploads:
